@@ -1,60 +1,119 @@
-#include <TFile.h>
-#include <TTree.h>
 #include <iostream>
 #include <vector>
-
-
-
 using namespace std;
 
-void efficienza(){
 
-  vector<double> tensione = {
-   1806, 1712, 1604, 1501, 1406, 1304, 1209, 1108 
-  }; //double per fare TGraph
 
-  vector<double> countAC = {
-    3272, 544, 559, 546, 565, 545, 489, 552
-  };
 
-  vector<double> countABC = {
-    1928, 339, 335, 342, 363, 126, 19, 3
-  };
+void eff(){
 
-  vector<double> err_tensione;
-  
-  vector<double> eff;
-  vector<double> err_eff;
+  // ---- Dataset (1806V: 15min, altri: 3 min)
+   vector<double> vset      = {1108, 1209, 1240, 1273, 1304, 1340, 1371, 1406,    1440, 1470, 1501, 1604, 1712, 1806}; 
+  vector<double> countAC   = {552,  489,  669,  617,   545, 605,  685,  565  , 787,  692,  546, 559,  544,  3272};
+  vector<double> countABC  = {3,    19,   31,   71,    126, 223,  331,  363  , 387,  341,  342,  335,  339, 1928};
 
-  for(int ii=0 ; ii<tensione.size() ; ii++){
-    eff.push_back((double)countABC[ii]/countAC[ii]);
-    err_eff.push_back(sqrt(eff[ii]*(1-eff[ii])/countAC[ii]));
-    err_tensione.push_back(0.0); //aggiungere incertezza tensione!!
+  int n = vset.size();
+  vector<double> err_vset, eff_binomial, err_eff_binomial;
+  vector<double> eff_bayes, err_eff_bayes;
+
+  // ---- Efficiency estimation binomial
+  for(int j=0 ; j<n ; j++){
+    eff_binomial.push_back(countABC[j]/countAC[j]);
+    err_eff_binomial.push_back(sqrt(eff_binomial[j]*(1-eff_binomial[j])/countAC[j]));   //binomial error by hand
+    err_vset.push_back(0.0);                                 //MODIFICA incertezza tensione!!
   }
-  TCanvas *c1 = new TCanvas("c1", "Conteggi AC", 800, 600); 
-  TGraph *AC = new TGraph(tensione.size(), &tensione[0], &countAC[0]); //maybe uselessss
-  AC->SetTitle("Conteggi AC;Tensione [V];Conteggi AC");
+
+
+  // ---- Efficiency estimation bayesian
+  for(int j=0 ; j<n ; j++){
+    eff_bayes.push_back((countABC[j]+1)/(countAC[j]+2));
+    err_eff_bayes.push_back(sqrt(eff_bayes[j]*(1-eff_bayes[j])/(countAC[j]+3)));   //bayesian error by hand
+     //MODIFICA incertezza tensione!!
+  }
+
+
+  // ---- TGraph Data
+  TCanvas *c1 = new TCanvas();
+  TGraph *AC = new TGraph(n, &vset[0], &countAC[0]);
+  AC->SetTitle("Counts AC;VSet (V);A and C");
   AC->SetMarkerStyle(20);
-  AC->SetMarkerColor(kBlue);
+  AC->SetMarkerColor(kViolet-3);
   AC->Draw("AP");
 
-
-  TCanvas *c2 = new TCanvas("c2", "Conteggi ABC", 800, 600);
-  TGraph *ABC = new TGraph(tensione.size(), &tensione[0], &countABC[0]);
-  ABC->SetTitle("Conteggi ABC;Tensione [V];Conteggi ABC");
-  ABC->SetMarkerStyle(21);
-  ABC->SetMarkerColor(kRed);
+  TCanvas *c2 = new TCanvas();
+  TGraph *ABC = new TGraph(n, &vset[0], &countABC[0]);
+  ABC->SetTitle("Counts ABC;VSet (V);(A and C) and B");
+  ABC->SetMarkerStyle(20);
+  ABC->SetMarkerColor(kTeal-5);
   ABC->Draw("AP");
 
-  TCanvas *c3 = new TCanvas("c3", "Efficienza", 800, 600);
-  TGraphErrors *G_eff = new TGraphErrors(tensione.size(), &tensione[0], &eff[0], &err_tensione[0], &err_eff[0]);
-  G_eff->SetTitle("Efficienza;Tensione [V];Efficienza");
+  // ---- Hist Data
+  vector<double> edges(n+1); //bins
+  for (int i = 1; i < n; ++i)
+    edges[i] = 0.5 * (vset[i] + vset[i-1]);
+  edges[0] = vset[0] + (vset[0] - edges[1]);
+  edges[n] = vset[n-1] - (edges[n-1] - vset[n-1]);
+  TH1D* hAC  = new TH1D("hAC",  "Counts AC;VSet (V);Counts", n, &edges[0]);
+  TH1D* hABC = new TH1D("hABC", "Counts ABC;VSet (V);Counts", n, &edges[0]);
+  for(int i = 0; i < n; i++){
+    hAC->SetBinContent(i+1, countAC[i]);    //hAC->SetBinError(i+1, sqrt(countAC[i]));
+    hABC->SetBinContent(i+1, countABC[i]);  //hABC->SetBinError(i+1, sqrt(countABC[i]));
+  }
+  TCanvas *ch1 = new TCanvas();
+  hAC->SetLineColor(kViolet-3);
+  hAC->SetLineWidth(2);
+  hAC->SetFillColor(kViolet-3);
+  hAC->SetFillStyle(3005);
+  hAC->SetBarWidth(0.8);
+  hAC->Sumw2();
+  hAC->Draw("bar");
+  TCanvas *ch2 = new TCanvas();
+  hABC->SetLineColor(kTeal-5);
+  hABC->SetLineWidth(2);
+  hABC->SetFillColor(kTeal-5);
+  hABC->SetFillStyle(3005);
+  hABC->SetBarWidth(0.8);
+  hABC->Sumw2();
+  hABC->Draw("bar");
+
+  // ---- Efficiency VS VSet
+     // Binomial error by hand
+  TCanvas *c3 = new TCanvas();
+  TGraphErrors *G_eff = new TGraphErrors(n, &vset[0], &eff_binomial[0], &err_vset[0], &err_eff_binomial[0]);
+  G_eff->SetTitle("Efficiency binomial handmade;VSet (V);Efficiency");
   G_eff->SetMarkerStyle(22);
-  G_eff->SetMarkerColor(kGreen+2);
+  G_eff->SetMarkerColor(kPink-8);
+  c3->SetGrid();
+  G_eff->SetMinimum(-0.05);
   G_eff->Draw("AP");
 
-  c1->Update();
-  c2->Update();
-  c3->Update();
+
+     // Bayesian error by hand
+  TCanvas *c5 = new TCanvas();
+  TGraphErrors *G_eff_bayes = new TGraphErrors(n, &vset[0], &eff_bayes[0], &err_vset[0], &err_eff_bayes[0]);
+  G_eff_bayes->SetTitle("Efficiency bayes handmade;VSet (V);Efficiency");
+  G_eff_bayes->SetMarkerStyle(22);
+  G_eff_bayes->SetMarkerColor(kPink-8);
+  c5->SetGrid();
+  G_eff_bayes->SetMinimum(-0.05);
+  G_eff_bayes->Draw("AP");
+
+
+  
+     // ROOT method
+  TCanvas *c4 = new TCanvas();
+  TGraphAsymmErrors *m_eff = new TGraphAsymmErrors();
+  m_eff->Divide(hABC, hAC);
+         /* 3^ parametro in ingresso = stringa con il metodo
+"B" binomiale, "b(.,.)" bayesian, "cp" Clopper–Pearson esplicito, "w" Wilson, "ac" Agresti–Coull */
+  m_eff->SetTitle("Efficiency methods;VSet (V);Efficiency");
+  m_eff->SetMarkerStyle(21);
+  m_eff->SetMarkerColor(kGreen+2);
+  c4->SetGrid();
+  m_eff->SetMinimum(-0.05);
+  m_eff->Draw("AP");
+  
+
+}
 
 }
